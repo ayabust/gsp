@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::TranslateEngine;
+use tracing::{debug, error, info, warn};
 // use serde_json::json;
 
 pub struct Libretranslate {}
@@ -13,6 +14,9 @@ impl TranslateEngine for Libretranslate {
         lang_to: &str,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let url = "https://libretranslate.com/translate";
+
+        debug!("Traduction depuis {} vers {}", lang_from, lang_to);
+        debug!("Texte à traduire: {} caractères", text.len());
 
         // request user agent
         let client = reqwest::blocking::Client::new();
@@ -27,6 +31,7 @@ impl TranslateEngine for Libretranslate {
         params.insert("format", "text");
         params.insert("api_key", "");
 
+        info!("Envoi de la requête de traduction à {}", url);
         let res = client
             .post(url)
             .header("Accept", "*/*")
@@ -45,7 +50,10 @@ impl TranslateEngine for Libretranslate {
             )
             .form(&params)
             .send()
-            .expect("Failed to send request");
+            .map_err(|e| {
+                error!("Échec de l'envoi de la requête: {}", e);
+                e
+            })?;
 
         // let res = client
         //     .post(url)
@@ -61,13 +69,24 @@ impl TranslateEngine for Libretranslate {
         //     .send()
         //     .unwrap();
 
+        let status = res.status();
+        debug!("Statut de la réponse: {}", status);
+
         let body = res.text()?;
-        let body: serde_json::Value = serde_json::from_str(&body)?;
+        debug!("Réponse brute: {} caractères", body.len());
+
+        let body: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+            error!("Échec du parsing JSON: {}", e);
+            e
+        })?;
 
         if body["translatedText"].is_null() {
+            warn!("Aucun texte traduit dans la réponse");
             Ok(String::from(""))
         } else {
-            Ok(body["translatedText"].to_string())
+            let translated = body["translatedText"].to_string();
+            info!("Traduction réussie: {} caractères", translated.len());
+            Ok(translated)
         }
     }
 

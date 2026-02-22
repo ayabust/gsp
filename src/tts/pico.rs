@@ -1,6 +1,7 @@
 use super::TtsEgine;
 use crate::utils::textutils::replace;
 use std::process::{Command, Stdio};
+use tracing::{debug, error, info};
 
 fn pico_effect(text: &str, speed: i32, pitch: i32, volume: i32) -> String {
     let speed = format!("<speed level=\"{}\">{}</speed>", speed, text);
@@ -36,14 +37,33 @@ impl TtsEgine for Pico {
         let text = replace(text);
         let effect = pico_effect(&text, self.speed, 100, 120);
 
-        Command::new("pico2wave")
+        debug!(
+            "Exécution de pico2wave: lang={}, output={}, texte={} caractères",
+            self.lang, self.output_file, text.len()
+        );
+
+        match Command::new("pico2wave")
             .arg(format!("--lang={}", self.lang))
             .arg(format!("-w={}", self.output_file))
             .arg("--")
             .arg(effect)
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .output()
-            .expect("failed to execute process");
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    info!("Génération audio réussie avec pico2wave");
+                    debug!("Fichier généré: {}", self.output_file);
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    error!("pico2wave a échoué: {}", stderr);
+                }
+            }
+            Err(e) => {
+                error!("Impossible d'exécuter pico2wave: {}", e);
+            }
+        }
     }
 
     fn set_lang(&mut self, lang: String) -> &mut Self {

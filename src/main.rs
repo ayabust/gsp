@@ -1,6 +1,7 @@
 mod cli;
 mod error;
 mod input;
+mod logging;
 mod player;
 mod translate;
 mod tts;
@@ -16,9 +17,12 @@ use utils::{get_pidof, textutils::*};
 
 use crate::tts::espeakng::EspeakNg;
 
+use std::path::PathBuf;
+use tracing::{debug, error, info, warn};
+
 fn main() {
     if let Err(e) = run() {
-        eprintln!("Erreur: {}", e);
+        error!("Erreur fatale: {}", e);
         std::process::exit(1);
     }
 }
@@ -26,26 +30,42 @@ fn main() {
 fn run() -> Result<()> {
     let args = Args::parse();
 
+    // Initialisation du logging
+    let log_dir = args.log_dir.clone().map(PathBuf::from);
+    logging::init(log_dir, args.verbose)?;
+
+    info!("Démarrage de GSP v{}", env!("CARGO_PKG_VERSION"));
+    debug!("Arguments: {:?}", args);
+
     if args.stop {
+        info!("Arrêt de la lecture en cours");
         stop_tts();
         return Ok(());
     }
 
     if is_another_instance_running() {
+        warn!("Une autre instance est déjà en cours d'exécution");
         return Err(GspError::InstanceAlreadyRunning);
     }
 
+    debug!("Récupération du texte depuis la source: {}", args.source);
     let text = get_input_text(&args)?;
+    debug!("Texte récupéré: {} caractères", text.len());
+
     let text = preprocess_text(&args, text);
+    debug!("Texte prétraité: {} caractères", text.len());
 
     let translated_text = if let Some(ref lang_sources) = args.lang_sources {
+        info!("Traduction depuis {} vers {}", lang_sources, args.lang_targets);
         translate_text(&args, lang_sources, text)?
     } else {
         text
     };
 
+    debug!("Configuration du moteur TTS: {}", args.engine_tts);
     let mut tts = configure_tts(&args, translated_text);
 
+    info!("Lecture du texte avec le moteur {}", args.engine_tts);
     match args.engine_tts.as_str() {
         "espeak" => tts.speak(&mut Espeak::new()),
         "espeak-ng" => tts.speak(&mut EspeakNg::new()),
@@ -54,6 +74,7 @@ fn run() -> Result<()> {
     }
     .play(Rodio {});
 
+    info!("Lecture terminée");
     Ok(())
 }
 

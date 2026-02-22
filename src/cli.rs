@@ -76,4 +76,19 @@ pub struct Args {
         action = ArgAction::SetTrue
     )]
     pub dev: bool,
+
+    #[arg(
+        short = 'v',
+        long = "verbose",
+        help = "Enable verbose logging (debug level)",
+        action = ArgAction::SetTrue
+    )]
+    pub verbose: bool,
+
+    #[arg(
+        long = "log-dir",
+        help = "Directory for log files (default: stdout only)",
+        value_hint = clap::ValueHint::DirPath
+    )]
+    pub log_dir: Option<String>,
 }
