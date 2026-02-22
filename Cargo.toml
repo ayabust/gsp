@@ -1,26 +1,72 @@
 [package]
 name = "gsp"
-version = "0.3.2"
-edition = "2024"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+version = "0.4.0"
+edition = "2021"
+authors = ["GSP Team"]
+description = "Screen reader with automatic language detection and OCR"
+license = "MIT"
+repository = "https://github.com/upskaling/gsp"
+keywords = ["accessibility", "screen-reader", "tts", "ocr"]
+categories = ["accessibility", "command-line-utilities"]
 
 [dependencies]
-cli-clipboard = "0.4.0"
-lingua = { version = "1.7.2", default-features = false, features = ["french", "english"] }
-psutil = "3.3.0"
-reqwest = { version = "0.12.24", features = ["blocking", "json"] }
-rodio = "0.21.1"
-serde = "1.0.228"
-serde_derive = "1.0.228"
-serde_json = "1.0.145"
-which = "8.0.0"
-x11-clipboard = "0.9.3"
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
 
-[dependencies.clap]
-version = "4.5.51"
-features = ["derive"]
+# Error handling
+thiserror = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# HTTP
+reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"] }
+
+# Audio
+rodio = "0.21"
+
+# Clipboard
+arboard = "3.3"
+
+# OCR
+leptess = "0.11"
+
+# Language detection
+lingua = { version = "1.7.2", default-features = false, features = ["french", "english"] }
+
+# Utilities
+dirs = "5.0"
+which = "8.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# Async (optionnel, pour performances)
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros"], optional = true }
+
+[dev-dependencies]
+mockall = "0.12"
+tempfile = "3.10"
+assert_cmd = "2.0"
+predicates = "3.1"
+
+[features]
+default = []
+async = ["tokio"]
 
 [profile.release]
-strip = true  # Automatically strip symbols from the binary.
 lto = true
+strip = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+debug = true
+
+[[bin]]
+name = "gsp"
+path = "src/main.rs"
