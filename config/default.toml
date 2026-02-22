@@ -1,0 +1,19 @@
+# Configuration par défaut de GSP
+# Copiez ce fichier vers ~/.config/gsp/config.toml pour personnaliser
+
+[tts]
+default_engine = "pico"
+default_speed = 1.0
+default_language = "fr-FR"
+
+[translation]
+default_engine = "libretranslate"
+auto_detect = true
+
+[audio]
+volume = 1.0
+cache_dir = "/tmp/gsp/audio"
+
+[paths]
+temp_dir = "/tmp/gsp"
+# log_dir = "/var/log/gsp"  # Décommenter pour activer le logging fichier
