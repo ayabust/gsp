@@ -1,119 +1,84 @@
+//! GSP - Screen Reader avec détection automatique de langue
+//!
+//! Application de lecture d'écran avec support TTS, OCR et traduction.
+
 mod cli;
-mod input;
-mod player;
-mod translate;
-mod tts;
+mod config;
+mod engine;
+mod error;
+mod logging;
+mod pipeline;
 mod utils;
 
 use clap::Parser;
 use cli::Args;
-use input::Input;
-use player::rodio::Rodio;
-use tts::{espeak::Espeak, pico::Pico, Tts};
-use utils::{get_pidof, textutils::*};
+use config::Config;
+use engine::{TtsFactory, ClipboardInput, SelectionInput, StdinInput, FileInput, RodioPlayer, LibreTranslate};
+use pipeline::ProcessingPipeline;
+use utils::{is_another_instance_running, stop_tts_processes, Language};
+use error::{Result, GspError};
+use tracing::{info, error, debug};
 
-use crate::tts::espeakng::EspeakNg;
-
-fn main() {
+fn main() -> Result<()> {
     let args = Args::parse();
-
+    
+    // Charger la configuration
+    let config = Config::load().unwrap_or_default();
+    
+    // Initialiser le logging
+    logging::init(config.paths.log_dir.clone(), args.verbose)?;
+    
+    info!("Démarrage de GSP v{}", env!("CARGO_PKG_VERSION"));
+    debug!("Configuration: {:?}", config);
+    
+    // Gestion de l'arrêt
     if args.stop {
-        stop_tts();
-        return;
+        info!("Arrêt des processus TTS en cours");
+        stop_tts_processes();
+        return Ok(());
     }
-
+    
+    // Vérifier les instances multiples
     if is_another_instance_running() {
-        println!("Une autre instance du programme est en cours");
-        stop_tts();
-        return;
+        error!("Une autre instance de GSP est déjà en cours d'exécution");
+        return Err(GspError::InstanceAlreadyRunning);
     }
-
-    let text = match get_input_text(&args) {
-        Ok(text) => text,
-        Err(e) => {
-            eprintln!("Erreur lors de la récupération du texte : {}", e);
-            return;
+    
+    // Sélectionner la source d'entrée
+    let input: Box<dyn engine::InputEngine> = match args.source.as_str() {
+        "clipboard" => Box::new(ClipboardInput::new()),
+        "selection" => Box::new(SelectionInput::new()),
+        "stdin" => Box::new(StdinInput::new()),
+        "file" => {
+            if let Some(ref path) = args.file {
+                Box::new(FileInput::new(path))
+            } else {
+                return Err(GspError::ConfigError("Option --file requise pour la source 'file'".to_string()));
+            }
         }
+        _ => Box::new(ClipboardInput::new()),
     };
-
-    let text = preprocess_text(&args, text);
-
-    let translated_text = if let Some(ref lang_sources) = args.lang_sources {
-        translate_text(&args, lang_sources, text).unwrap()
-    } else {
-        text
-    };
-
-    let mut tts = configure_tts(&args, translated_text);
-
-    match args.engine_tts.as_str() {
-        "espeak" => tts.speak(&mut Espeak::new()),
-        "espeak-ng" => tts.speak(&mut EspeakNg::new()),
-        "pico" => tts.speak(&mut Pico::new()),
-        _ => tts.speak(&mut Pico::new()),
+    
+    // Créer le moteur TTS
+    let tts = TtsFactory::create(&args.engine_tts, &args.lang_targets)?;
+    
+    // Créer le lecteur audio
+    let mut audio = RodioPlayer::new();
+    audio.set_volume(config.audio.volume);
+    
+    // Créer le pipeline
+    let mut pipeline = ProcessingPipeline::new(input, tts, audio)
+        .with_lang(&args.lang_targets)
+        .with_speed(args.speed.parse().unwrap_or(1.0));
+    
+    // Ajouter la traduction si demandée
+    if args.translate {
+        let translator = LibreTranslate::new();
+        pipeline = pipeline.with_translation(translator);
     }
-    .play(Rodio {});
-}
-
-fn stop_tts() {
-    Tts::new().stop(Rodio {});
-}
-
-fn is_another_instance_running() -> bool {
-    get_pidof("gsp").len() > 1
-}
-
-fn get_input_text(args: &Args) -> Result<String, String> {
-    let text = Input::new(
-        args.source.clone(),
-        args.lang_sources
-            .clone()
-            .unwrap_or(args.lang_targets.clone()),
-    )
-    .input();
-
-    if text.is_empty() {
-        return Err("Aucun texte à lire".to_string());
-    }
-
-    Ok(text)
-}
-
-fn preprocess_text(args: &Args, text: String) -> String {
-    let mut text = if args.dev {
-        read_vars(&text).to_lowercase()
-    } else {
-        text
-    };
-
-    text = parse_hashtag(&text);
-    text = trim_whitespace(&text);
-    text = remove_special_characters(&text);
-
-    text
-}
-
-fn translate_text(
-    args: &Args,
-    lang_sources: &str,
-    text: String,
-) -> Result<String, Box<dyn std::error::Error>> {
-    translate::Translate::new().translate(
-        args.engine_translation.as_str(),
-        text.as_str(),
-        lang_sources,
-        args.lang_targets.as_str(),
-    )
-}
-
-fn configure_tts(args: &Args, text: String) -> Tts {
-    let speed = args.speed.parse::<f32>().unwrap_or(1.0) * 100.0;
-    let speed = speed as i32;
-
-    let mut tts = Tts::new();
-    tts.set_lang(args.lang_targets.to_string())
-        .set_speed(speed)
-        .set_text(text);
-
-    tts
+    
+    // Exécuter le pipeline
+    pipeline.execute()?;
+    
+    Ok(())
 }
