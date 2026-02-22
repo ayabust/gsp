@@ -1,4 +1,5 @@
 mod cli;
+mod error;
 mod input;
 mod player;
 mod translate;
@@ -7,6 +8,7 @@ mod utils;
 
 use clap::Parser;
 use cli::Args;
+use error::{GspError, InputError, Result, TranslationError};
 use input::Input;
 use player::rodio::Rodio;
 use tts::{espeak::Espeak, pico::Pico, Tts};
@@ -15,31 +17,29 @@ use utils::{get_pidof, textutils::*};
 use crate::tts::espeakng::EspeakNg;
 
 fn main() {
+    if let Err(e) = run() {
+        eprintln!("Erreur: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     let args = Args::parse();
 
     if args.stop {
         stop_tts();
-        return;
+        return Ok(());
     }
 
     if is_another_instance_running() {
-        println!("Une autre instance du programme est en cours");
-        stop_tts();
-        return;
+        return Err(GspError::InstanceAlreadyRunning);
     }
 
-    let text = match get_input_text(&args) {
-        Ok(text) => text,
-        Err(e) => {
-            eprintln!("Erreur lors de la récupération du texte : {}", e);
-            return;
-        }
-    };
-
+    let text = get_input_text(&args)?;
     let text = preprocess_text(&args, text);
 
     let translated_text = if let Some(ref lang_sources) = args.lang_sources {
-        translate_text(&args, lang_sources, text).unwrap()
+        translate_text(&args, lang_sources, text)?
     } else {
         text
     };
@@ -53,6 +53,8 @@ fn main() {
         _ => tts.speak(&mut Pico::new()),
     }
     .play(Rodio {});
+
+    Ok(())
 }
 
 fn stop_tts() {
@@ -63,7 +65,7 @@ fn is_another_instance_running() -> bool {
     get_pidof("gsp").len() > 1
 }
 
-fn get_input_text(args: &Args) -> Result<String, String> {
+fn get_input_text(args: &Args) -> Result<String> {
     let text = Input::new(
         args.source.clone(),
         args.lang_sources
@@ -73,7 +75,7 @@ fn get_input_text(args: &Args) -> Result<String, String> {
     .input();
 
     if text.is_empty() {
-        return Err("Aucun texte à lire".to_string());
+        return Err(InputError::EmptyClipboard.into());
     }
 
     Ok(text)
@@ -93,17 +95,15 @@ fn preprocess_text(args: &Args, text: String) -> String {
     text
 }
 
-fn translate_text(
-    args: &Args,
-    lang_sources: &str,
-    text: String,
-) -> Result<String, Box<dyn std::error::Error>> {
-    translate::Translate::new().translate(
-        args.engine_translation.as_str(),
-        text.as_str(),
-        lang_sources,
-        args.lang_targets.as_str(),
-    )
+fn translate_text(args: &Args, lang_sources: &str, text: String) -> Result<String> {
+    translate::Translate::new()
+        .translate(
+            args.engine_translation.as_str(),
+            text.as_str(),
+            lang_sources,
+            args.lang_targets.as_str(),
+        )
+        .map_err(|e| TranslationError::TranslationFailed(e.to_string()).into())
 }
 
 fn configure_tts(args: &Args, text: String) -> Tts {

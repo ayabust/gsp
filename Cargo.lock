@@ -763,6 +763,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "thiserror",
  "which",
  "x11-clipboard 0.9.3",
 ]
